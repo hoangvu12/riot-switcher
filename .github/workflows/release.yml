@@ -1,0 +1,40 @@
+name: release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+
+      - name: Build
+        shell: pwsh
+        run: |
+          go build -trimpath -ldflags='-s -w' -o rsw-windows-amd64.exe .
+
+      - name: Checksums
+        shell: pwsh
+        run: |
+          Get-FileHash .\rsw-windows-amd64.exe -Algorithm SHA256 |
+            ForEach-Object { "$($_.Hash.ToLower())  rsw-windows-amd64.exe" } |
+            Set-Content -Encoding ASCII .\checksums.txt
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            rsw-windows-amd64.exe
+            checksums.txt
+          generate_release_notes: true
