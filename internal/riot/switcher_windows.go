@@ -2,10 +2,13 @@ package riot
 
 import (
 	"bytes"
+	"crypto/tls"
 	"encoding/csv"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -36,6 +39,17 @@ type snapshotItem struct {
 	Required bool
 	Dir      bool
 	Ignore   map[string]bool
+}
+
+type loginState struct {
+	Phase   string `json:"phase"`
+	Persist bool   `json:"persist"`
+}
+
+type localAPI struct {
+	Protocol string
+	Port     string
+	Password string
 }
 
 func BeginSetup(opts Options) error {
@@ -75,6 +89,16 @@ func Capture(snapshotDir string, opts Options) error {
 	if !ready {
 		return errors.New("Riot session is not ready; log in with Stay signed in enabled, then try capture again")
 	}
+	state, err := currentLoginState()
+	if err != nil {
+		return err
+	}
+	if !strings.EqualFold(state.Phase, "logged_in") {
+		return fmt.Errorf("Riot is not logged in yet (status: %s); finish login and 2FA, then try capture again", state.Phase)
+	}
+	if !state.Persist {
+		return errors.New("Riot login is not persistent; enable Stay signed in / remember this device, then sign in again")
+	}
 	log("closing Riot Client so persisted session files flush to disk")
 	gracefulQuit()
 	_ = killProcesses(clientProcesses...)
@@ -83,6 +107,19 @@ func Capture(snapshotDir string, opts Options) error {
 	}
 	log("capturing Riot session snapshot")
 	return backupLiveSnapshot(snapshotDir, installDir)
+}
+
+func LiveSessionReady(opts Options) bool {
+	path, err := ResolveClientPath(opts.RiotClientPath)
+	if err != nil {
+		return false
+	}
+	ready, err := settingsReady(filepath.Dir(path))
+	if err != nil || !ready {
+		return false
+	}
+	state, err := currentLoginState()
+	return err == nil && strings.EqualFold(state.Phase, "logged_in") && state.Persist
 }
 
 func Switch(snapshotDir string, opts Options) error {
@@ -106,6 +143,9 @@ func Switch(snapshotDir string, opts Options) error {
 	log("restoring Riot session snapshot")
 	if err := restoreLiveSnapshot(snapshotDir, filepath.Dir(path)); err != nil {
 		return err
+	}
+	if size, err := privateSettingsSize(filepath.Dir(path)); err == nil {
+		log("restored Riot session file (%d bytes)", size)
 	}
 	log("launching Riot Client")
 	return launchRiot(path)
@@ -240,6 +280,18 @@ func settingsReady(installDir string) (bool, error) {
 	return bytes.Contains(data, []byte("offline_access")), nil
 }
 
+func privateSettingsSize(installDir string) (int64, error) {
+	path, err := localPath(`Riot Games\Riot Client\Data\RiotGamesPrivateSettings.yaml`)(installDir)
+	if err != nil {
+		return 0, err
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		return 0, err
+	}
+	return info.Size(), nil
+}
+
 func localPath(relative string) func(string) (string, error) {
 	return func(string) (string, error) {
 		base := os.Getenv("LOCALAPPDATA")
@@ -326,20 +378,12 @@ func ensureNoGameRunning() error {
 }
 
 func gracefulQuit() {
-	lockfile, err := riotLockfile()
+	api, err := readLocalAPI()
 	if err != nil {
 		return
 	}
-	data, err := os.ReadFile(lockfile)
-	if err != nil {
-		return
-	}
-	parts := strings.Split(strings.TrimSpace(string(data)), ":")
-	if len(parts) < 5 {
-		return
-	}
-	url := fmt.Sprintf("%s://127.0.0.1:%s/process-control/v1/process/quit", parts[4], parts[2])
-	password := powershellSingleQuoted(parts[3])
+	url := fmt.Sprintf("%s://127.0.0.1:%s/process-control/v1/process/quit", api.Protocol, api.Port)
+	password := powershellSingleQuoted(api.Password)
 	script := fmt.Sprintf(`
 [System.Net.ServicePointManager]::ServerCertificateValidationCallback = { $true }
 $pair = 'riot:%s'
@@ -348,7 +392,57 @@ $auth = [Convert]::ToBase64String($bytes)
 try { Invoke-WebRequest -UseBasicParsing -Method Post -Uri '%s' -Headers @{ Authorization = "Basic $auth" } | Out-Null } catch { }
 `, password, powershellSingleQuoted(url))
 	_ = exec.Command("powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", script).Run()
-	time.Sleep(1500 * time.Millisecond)
+	time.Sleep(2500 * time.Millisecond)
+}
+
+func currentLoginState() (loginState, error) {
+	api, err := readLocalAPI()
+	if err != nil {
+		return loginState{}, errors.New("Riot Client local API is not available; keep Riot open after login, then try capture again")
+	}
+	var state loginState
+	if err := getLocalJSON(api, "/riot-login/v1/status", &state); err != nil {
+		return loginState{}, err
+	}
+	return state, nil
+}
+
+func readLocalAPI() (localAPI, error) {
+	lockfile, err := riotLockfile()
+	if err != nil {
+		return localAPI{}, err
+	}
+	data, err := os.ReadFile(lockfile)
+	if err != nil {
+		return localAPI{}, err
+	}
+	parts := strings.Split(strings.TrimSpace(string(data)), ":")
+	if len(parts) < 5 {
+		return localAPI{}, errors.New("Riot lockfile format is invalid")
+	}
+	return localAPI{Protocol: parts[4], Port: parts[2], Password: parts[3]}, nil
+}
+
+func getLocalJSON(api localAPI, path string, target any) error {
+	client := &http.Client{Timeout: 5 * time.Second, Transport: &http.Transport{
+		// Riot's localhost API uses a self-signed certificate and lockfile auth.
+		TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
+	}}
+	url := fmt.Sprintf("%s://127.0.0.1:%s%s", api.Protocol, api.Port, path)
+	req, err := http.NewRequest(http.MethodGet, url, nil)
+	if err != nil {
+		return err
+	}
+	req.SetBasicAuth("riot", api.Password)
+	resp, err := client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode > 299 {
+		return fmt.Errorf("Riot local API %s returned %s", path, resp.Status)
+	}
+	return json.NewDecoder(resp.Body).Decode(target)
 }
 
 func riotLockfile() (string, error) {

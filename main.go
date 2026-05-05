@@ -123,16 +123,38 @@ func captureProfile(store *account.Store, id, label string) error {
 	if err := store.Upsert(account.Profile{ID: id, Label: label, CapturedAt: time.Now()}); err != nil {
 		return err
 	}
+	if err := store.SetCurrent(id); err != nil {
+		return err
+	}
 	fmt.Printf("Captured %s (%s).\n", id, label)
 	fmt.Printf("Switch to it later with: rsw use %s\n", id)
 	return nil
 }
 
 func switchProfile(store *account.Store, id string) error {
+	current, err := store.Current()
+	if err != nil {
+		return err
+	}
+	if current != "" && current != id {
+		if profile, err := store.Get(current); err == nil && riot.LiveSessionReady(riot.Options{Log: logf}) {
+			fmt.Println("Saving current live session for", current)
+			if err := riot.Capture(store.SnapshotDir(current), riot.Options{Log: logf}); err != nil {
+				return err
+			}
+			profile.CapturedAt = time.Now()
+			if err := store.Upsert(profile); err != nil {
+				return err
+			}
+		}
+	}
 	if _, err := store.Get(id); err != nil {
 		return err
 	}
 	if err := riot.Switch(store.SnapshotDir(id), riot.Options{Log: logf}); err != nil {
+		return err
+	}
+	if err := store.SetCurrent(id); err != nil {
 		return err
 	}
 	fmt.Println("Switched to", id)

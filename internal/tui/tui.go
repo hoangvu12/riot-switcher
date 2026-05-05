@@ -367,10 +367,29 @@ func (m model) loadProfiles() tea.Msg {
 func switchProfile(store *account.Store, id string) tea.Cmd {
 	return func() tea.Msg {
 		var logs bytes.Buffer
+		current, err := store.Current()
+		if err != nil {
+			return actionMsg{err: err, log: logs.String()}
+		}
+		if current != "" && current != id {
+			if profile, err := store.Get(current); err == nil && riot.LiveSessionReady(riot.Options{Log: logTo(&logs)}) {
+				logs.WriteString("Saving current live session for " + current + ".\n")
+				if err := riot.Capture(store.SnapshotDir(current), riot.Options{Log: logTo(&logs)}); err != nil {
+					return actionMsg{err: err, log: logs.String()}
+				}
+				profile.CapturedAt = time.Now()
+				if err := store.Upsert(profile); err != nil {
+					return actionMsg{err: err, log: logs.String()}
+				}
+			}
+		}
 		if _, err := store.Get(id); err != nil {
 			return actionMsg{err: err, log: logs.String()}
 		}
 		if err := riot.Switch(store.SnapshotDir(id), riot.Options{Log: logTo(&logs)}); err != nil {
+			return actionMsg{err: err, log: logs.String()}
+		}
+		if err := store.SetCurrent(id); err != nil {
 			return actionMsg{err: err, log: logs.String()}
 		}
 		return actionMsg{message: "Switched to " + id + ".", log: logs.String()}
@@ -394,6 +413,9 @@ func captureProfile(store *account.Store, id, label string) tea.Cmd {
 			return actionMsg{err: err, log: logs.String()}
 		}
 		if err := store.Upsert(account.Profile{ID: id, Label: label, CapturedAt: time.Now()}); err != nil {
+			return actionMsg{err: err, log: logs.String()}
+		}
+		if err := store.SetCurrent(id); err != nil {
 			return actionMsg{err: err, log: logs.String()}
 		}
 		return actionMsg{message: fmt.Sprintf("Captured %s (%s).", id, label), log: logs.String()}

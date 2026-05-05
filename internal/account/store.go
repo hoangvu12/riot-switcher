@@ -1,6 +1,7 @@
 package account
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -35,6 +36,25 @@ func OpenDefaultStore() (*Store, error) {
 
 func (s *Store) SnapshotDir(id string) string {
 	return filepath.Join(s.dir, "profiles", id)
+}
+
+func (s *Store) CurrentPath() string {
+	return filepath.Join(s.dir, "current")
+}
+
+func (s *Store) Current() (string, error) {
+	data, err := os.ReadFile(s.CurrentPath())
+	if errors.Is(err, os.ErrNotExist) {
+		return "", nil
+	}
+	if err != nil {
+		return "", err
+	}
+	return string(bytes.TrimSpace(data)), nil
+}
+
+func (s *Store) SetCurrent(id string) error {
+	return os.WriteFile(s.CurrentPath(), []byte(id), 0600)
 }
 
 func (s *Store) List() ([]Profile, error) {
@@ -103,6 +123,11 @@ func (s *Store) Remove(id string) error {
 	}
 	if err := os.RemoveAll(s.SnapshotDir(id)); err != nil {
 		return err
+	}
+	if current, err := s.Current(); err != nil {
+		return err
+	} else if current == id {
+		_ = os.Remove(s.CurrentPath())
 	}
 	return s.save(next)
 }
