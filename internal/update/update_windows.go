@@ -12,7 +12,7 @@ import (
 	"strings"
 )
 
-const defaultRepo = "nguyenvu/riot-switcher"
+const defaultRepo = "hoangvu12/riot-switcher"
 const assetName = "rsw-windows-amd64.exe"
 
 type Options struct {

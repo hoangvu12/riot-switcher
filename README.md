@@ -9,7 +9,7 @@ Small Windows CLI for switching Riot accounts without saving Riot passwords.
 One-line install from GitHub Releases:
 
 ```powershell
-irm https://raw.githubusercontent.com/nguyenvu/riot-switcher/main/scripts/install-from-github.ps1 | iex
+irm https://raw.githubusercontent.com/hoangvu12/riot-switcher/main/scripts/install-from-github.ps1 | iex
 ```
 
 Open a new terminal after installing, then check it works:
@@ -138,7 +138,7 @@ To make it permanent for your Windows user:
 ## From Source
 
 ```powershell
-git clone https://github.com/nguyenvu/riot-switcher.git
+git clone https://github.com/hoangvu12/riot-switcher.git
 cd riot-switcher
 powershell -ExecutionPolicy Bypass -File .\scripts\install.ps1
 ```

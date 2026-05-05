@@ -1,5 +1,5 @@
 param(
-    [string]$Repo = 'nguyenvu/riot-switcher',
+    [string]$Repo = 'hoangvu12/riot-switcher',
     [string]$Version = 'latest',
     [string]$InstallDir = (Join-Path $env:LOCALAPPDATA 'Programs\riot-switcher')
 )
@@ -7,7 +7,7 @@ param(
 $ErrorActionPreference = 'Stop'
 
 if ($Repo -notmatch '^[^/]+/[^/]+$') {
-    throw 'Repo must be in owner/name form, for example: nguyenvu/riot-switcher'
+    throw 'Repo must be in owner/name form, for example: hoangvu12/riot-switcher'
 }
 
 $assetName = 'rsw-windows-amd64.exe'
