@@ -1,6 +1,7 @@
 package update
 
 import (
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -10,10 +11,12 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
 const defaultRepo = "hoangvu12/riot-switcher"
 const assetName = "rsw-windows-amd64.exe"
+const checksumName = "checksums.txt"
 
 type Options struct {
 	Repo    string
@@ -55,14 +58,30 @@ func Run(opts Options) error {
 		return err
 	}
 	assetURL := ""
+	checksumURL := ""
 	for _, asset := range rel.Assets {
 		if asset.Name == assetName {
 			assetURL = asset.URL
-			break
+		}
+		if asset.Name == checksumName {
+			checksumURL = asset.URL
 		}
 	}
 	if assetURL == "" {
 		return fmt.Errorf("release %s does not contain %s", rel.TagName, assetName)
+	}
+	if checksumURL == "" {
+		return fmt.Errorf("release %s does not contain %s", rel.TagName, checksumName)
+	}
+
+	log("fetching checksums")
+	checksums, err := downloadBytes(checksumURL)
+	if err != nil {
+		return err
+	}
+	expectedHash, err := checksumFor(checksums, assetName)
+	if err != nil {
+		return err
 	}
 
 	exePath, err := os.Executable()
@@ -76,7 +95,11 @@ func Run(opts Options) error {
 
 	tmpPath := filepath.Join(os.TempDir(), assetName)
 	log("downloading %s", assetURL)
-	if err := download(assetURL, tmpPath); err != nil {
+	if err := download(assetURL, tmpPath, log); err != nil {
+		return err
+	}
+	if err := verifyChecksum(tmpPath, expectedHash); err != nil {
+		_ = os.Remove(tmpPath)
 		return err
 	}
 
@@ -113,7 +136,25 @@ func fetchRelease(repo, version string) (release, error) {
 	return rel, nil
 }
 
-func download(url, target string) error {
+func downloadBytes(url string) ([]byte, error) {
+	req, err := http.NewRequest(http.MethodGet, url, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("User-Agent", "rsw")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode > 299 {
+		return nil, fmt.Errorf("download failed: %s", resp.Status)
+	}
+	return io.ReadAll(resp.Body)
+}
+
+func download(url, target string, log func(format string, args ...any)) error {
 	req, err := http.NewRequest(http.MethodGet, url, nil)
 	if err != nil {
 		return err
@@ -134,8 +175,67 @@ func download(url, target string) error {
 		return err
 	}
 	defer out.Close()
-	_, err = io.Copy(out, resp.Body)
+	_, err = io.Copy(out, &progressReader{reader: resp.Body, total: resp.ContentLength, log: log})
+	if err == nil {
+		log("download complete")
+	}
 	return err
+}
+
+type progressReader struct {
+	reader io.Reader
+	total  int64
+	read   int64
+	last   time.Time
+	log    func(format string, args ...any)
+}
+
+func (r *progressReader) Read(p []byte) (int, error) {
+	n, err := r.reader.Read(p)
+	if n > 0 {
+		r.read += int64(n)
+		if time.Since(r.last) > time.Second {
+			r.last = time.Now()
+			if r.total > 0 {
+				r.log("downloaded %.1f/%.1f MB", bytesToMB(r.read), bytesToMB(r.total))
+			} else {
+				r.log("downloaded %.1f MB", bytesToMB(r.read))
+			}
+		}
+	}
+	return n, err
+}
+
+func bytesToMB(n int64) float64 {
+	return float64(n) / 1024 / 1024
+}
+
+func checksumFor(data []byte, name string) (string, error) {
+	for _, line := range strings.Split(string(data), "\n") {
+		fields := strings.Fields(line)
+		if len(fields) >= 2 && fields[1] == name {
+			return strings.ToLower(fields[0]), nil
+		}
+	}
+	return "", fmt.Errorf("checksum entry not found for %s", name)
+}
+
+func verifyChecksum(path, expected string) error {
+	f, err := os.Open(path)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+
+	hash := sha256.New()
+	if _, err := io.Copy(hash, f); err != nil {
+		return err
+	}
+	actual := fmt.Sprintf("%x", hash.Sum(nil))
+	if actual != strings.ToLower(expected) {
+		return fmt.Errorf("checksum mismatch for %s", filepath.Base(path))
+	}
+	return nil
 }
 
 func replaceAfterExit(exePath, tmpPath string) error {

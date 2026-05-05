@@ -15,8 +15,10 @@ irm https://raw.githubusercontent.com/hoangvu12/riot-switcher/main/scripts/insta
 Open a new terminal after installing, then check it works:
 
 ```powershell
-rsw --help
+rsw
 ```
+
+The GitHub installer uses `curl.exe` when available for faster release downloads, then verifies the downloaded `.exe` against the release checksum before installing.
 
 Update later:
 
@@ -66,6 +68,7 @@ rsw save alt "Alt Account"
 Switch accounts:
 
 ```powershell
+rsw
 rsw use main
 rsw use alt
 ```
@@ -85,6 +88,7 @@ rsw delete alt
 ## Commands
 
 ```text
+rsw                      Open the interactive TUI
 rsw list                 List profiles
 rsw add <id> [label]     Open Riot Client with a clean login session
 rsw save <id> [label]    Save the currently signed-in Riot session
@@ -92,7 +96,29 @@ rsw use <id>             Restore a saved profile and launch Riot Client
 rsw delete <id>          Delete a saved profile
 rsw path                 Show detected Riot Client path
 rsw update               Update rsw from GitHub Releases
+rsw tui                  Open the interactive TUI explicitly
 ```
+
+TUI keys:
+
+```text
+up/down, j/k  Move selection
+enter         Switch to selected profile
+a             Add a profile and open Riot for manual login
+s             Save the current Riot session into a profile
+d             Delete selected profile
+r             Refresh profiles
+q             Quit
+```
+
+In the TUI, adding an account is a two-step flow:
+
+```text
+1. Start Login       Opens Riot with a clean login state. Nothing is saved yet.
+2. Capture Login     After you sign in to Riot, saves the current logged-in session.
+```
+
+`Capture Login` saves whichever Riot account is currently logged in on this PC. If you just used `Start Login`, it defaults to that pending profile instead of the selected row, so you do not accidentally overwrite another account.
 
 Aliases:
 
@@ -149,6 +175,7 @@ The GitHub installer expects each release to include:
 
 ```text
 rsw-windows-amd64.exe
+checksums.txt
 ```
 
 The included GitHub Actions workflow creates this asset when a tag like `v0.1.0` is pushed.

@@ -9,6 +9,7 @@ import (
 
 	"riot-switcher/internal/account"
 	"riot-switcher/internal/riot"
+	"riot-switcher/internal/tui"
 	"riot-switcher/internal/update"
 )
 
@@ -19,7 +20,9 @@ func main() {
 	}
 
 	if len(os.Args) < 2 {
-		printHelp()
+		if err := tui.Run(store); err != nil {
+			fatal(err)
+		}
 		return
 	}
 
@@ -69,6 +72,10 @@ func main() {
 		}
 	case "help", "-h", "--help":
 		printHelp()
+	case "tui":
+		if err := tui.Run(store); err != nil {
+			fatal(err)
+		}
 	default:
 		printHelp()
 		os.Exit(2)
@@ -168,13 +175,15 @@ Simple flow:
   rsw use main                      Switch to that account later
 
 Commands:
+  rsw                               Open the interactive TUI
   rsw list                          List profiles (alias: ls)
   rsw add <id> [label]              Start adding a profile (alias: login)
   rsw save <id> [label]             Capture current Riot session (alias: capture)
   rsw use <id>                      Restore profile and launch Riot (alias: switch)
   rsw delete <id>                   Delete profile (aliases: remove, rm, del)
   rsw path                          Print detected Riot client path
-  rsw update                        Update from latest GitHub release`)
+  rsw update                        Update from latest GitHub release
+  rsw tui                           Open the interactive TUI`)
 }
 
 func fatal(err error) {
