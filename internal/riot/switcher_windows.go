@@ -147,6 +147,13 @@ func Switch(snapshotDir string, opts Options) error {
 	if size, err := privateSettingsSize(filepath.Dir(path)); err == nil {
 		log("restored Riot session file (%d bytes)", size)
 	}
+	if changed, err := refreshLiveSession(); err != nil {
+		log("session token refresh skipped: %v", err)
+	} else if changed {
+		log("session tokens refreshed with Riot")
+	} else {
+		log("session tokens already current")
+	}
 	log("launching Riot Client")
 	return launchRiot(path)
 }
@@ -176,6 +183,7 @@ func snapshotItems() []snapshotItem {
 		{Name: "RiotGamesPrivateSettings.yaml", Required: true, Path: localPath(`Riot Games\Riot Client\Data\RiotGamesPrivateSettings.yaml`)},
 		{Name: "LeagueRiotGamesPrivateSettings.yaml", Path: localPath(`Riot Games\League of Legends\Data\RiotGamesPrivateSettings.yaml`)},
 		{Name: "Sessions", Dir: true, Path: localPath(`Riot Games\Riot Client\Data\Sessions`)},
+		{Name: "HttpCache", Dir: true, Path: localPath(`Riot Games\Riot Client\HttpCache`)},
 		{Name: "RiotClientConfig", Dir: true, Path: localPath(`Riot Games\Riot Client\Config`), Ignore: map[string]bool{"lockfile": true}},
 		{Name: "RiotMetadata", Dir: true, Path: programDataPath(`Riot Games\Metadata\Riot Client`)},
 		{Name: "InstallConfig", Dir: true, Path: func(installDir string) (string, error) { return filepath.Join(installDir, "Config"), nil }},
